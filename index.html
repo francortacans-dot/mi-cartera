@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="night">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mi Cartera | Inversiones Pro</title>
+
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.17.1/firebase-auth-compat.js"></script>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@3.9.4/dist/full.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&family=IBM+Plex+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        body { font-family: 'IBM Plex Sans', sans-serif; background-color: #0b0f1a; color: #94a3b8; }
+        .card-pro { background: #161d2d; border: 1px solid rgba(255,255,255,0.05); }
+        .hidden { display: none; }
+        .category-row { background: rgba(56, 189, 248, 0.05); color: #38bdf8; font-weight: 800; font-size: 0.65rem; letter-spacing: 0.15em; }
+    </style>
+</head>
+
+<body class="min-h-screen">
+
+    <div id="login-screen" class="flex items-center justify-center min-h-screen p-4">
+        <div class="card-pro p-8 rounded-3xl w-full max-w-sm text-center shadow-2xl">
+            <h1 class="text-2xl font-black text-white mb-6 uppercase tracking-tighter italic">Mi Cartera</h1>
+            <div class="flex flex-col gap-3">
+                <input id="auth-email" type="email" placeholder="Email" class="input input-bordered w-full bg-slate-800 text-sm" />
+                <input id="auth-pass" type="password" placeholder="Contraseña" class="input input-bordered w-full bg-slate-800 text-sm" />
+                <button onclick="login()" class="btn btn-primary w-full uppercase font-black italic">Entrar</button>
+                <button onclick="register()" class="btn btn-outline btn-xs w-full opacity-60 mt-2">Crear Cuenta</button>
+            </div>
+            <p id="auth-error" class="text-error text-[10px] mt-6 uppercase font-bold"></p>
+        </div>
+    </div>
+
+    <div id="app-screen" class="hidden pb-24">
+        <div class="container mx-auto p-4 max-w-7xl">
+            <header class="flex justify-between items-center mb-6">
+                <div>
+                    <h1 class="text-xl font-bold text-white uppercase tracking-tighter italic">Mi Cartera</h1>
+                    <p id="user-display" class="text-[9px] font-mono text-primary italic uppercase"></p>
+                </div>
+                <button onclick="firebase.auth().signOut()" class="btn btn-xs btn-ghost opacity-40">Cerrar Sesión</button>
+            </header>
+
+            <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-8 text-center">
+                <div class="card-pro p-4 rounded-xl border-t-2 border-primary col-span-2 md:col-span-1">
+                    <div class="text-[8px] uppercase font-bold text-slate-500 mb-1">Cash Disponible</div>
+                    <div class="flex items-center justify-center text-white font-mono font-bold text-lg">
+                        <span class="mr-1 text-slate-500 text-xs">$</span>
+                        <input id="cash-available" type="number" step="0.01" class="bg-transparent w-24 outline-none text-center" onchange="syncToFirebase()" />
+                    </div>
+                </div>
+                <div class="card-pro p-4 rounded-xl"><div class="text-[8px] uppercase font-bold text-slate-500 mb-1">Invertido</div><div id="total-assets" class="text-sm font-mono font-bold text-white">$0.00</div></div>
+                <div class="card-pro p-4 rounded-xl"><div class="text-[8px] uppercase font-bold text-slate-500 mb-1">Ganancia/Pérdida</div><div id="total-profit" class="text-sm font-mono font-bold">$0.00</div></div>
+                <div class="card-pro p-4 rounded-xl"><div class="text-[8px] uppercase font-bold text-slate-500 mb-1">Rendimiento %</div><div id="total-perc" class="text-sm font-mono font-bold">0.00%</div></div>
+                <div class="card-pro p-4 rounded-xl bg-blue-500/5 col-span-2 md:col-span-1 border border-primary/20 italic">
+                    <div class="text-[8px] uppercase font-bold text-primary mb-1">Patrimonio Total</div>
+                    <div id="total-combined" class="text-lg font-mono font-bold text-white">$0.00</div>
+                </div>
+            </div>
+
+            <div class="card-pro rounded-xl overflow-x-auto shadow-2xl">
+                <table class="table w-full text-center">
+                    <thead>
+                        <tr class="text-slate-500 uppercase text-[9px] tracking-widest">
+                            <th class="text-left pl-6">Activo</th>
+                            <th>Cantidad</th>
+                            <th>PPC (u$d)</th>
+                            <th class="text-primary italic">Comisión (0.5%)</th>
+                            <th>Costo Total</th>
+                            <th>NYSE / Ajustado</th>
+                            <th>% Cartera</th>
+                            <th>Eliminar</th>
+                        </tr>
+                    </thead>
+                    <tbody id="portfolio-body" class="font-mono text-[11px] text-white"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="fixed bottom-6 right-6 flex flex-col gap-3">
+            <button onclick="updatePrices()" id="btn-refresh" class="btn btn-circle btn-ghost bg-slate-900 border border-white/10 shadow-xl">↻</button>
+            <button onclick="document.getElementById('modal_asset').showModal()" class="btn btn-circle btn-primary shadow-xl text-xl font-bold">+</button>
+        </div>
+    </div>
+
+    <dialog id="modal_asset" class="modal">
+        <div class="modal-box bg-slate-900 border border-white/10 p-6 rounded-3xl text-center">
+            <h3 class="font-bold text-white uppercase italic text-sm mb-4">Nueva Operación</h3>
+            <div class="grid grid-cols-2 gap-3">
+                <select id="inp-folder" class="select select-bordered bg-slate-800 col-span-2 text-xs">
+                    <option value="Cedears">CEDEARs</option>
+                    <option value="Acciones">Acciones</option>
+                    <option value="Bonos">Bonos</option>
+                    <option value="ONs">ON's</option>
+                </select>
+                <input id="inp-ticker" type="text" class="input bg-slate-800 text-xs uppercase" placeholder="TICKER" />
+                <input id="inp-ratio" type="number" class="input bg-slate-800 text-xs" value="1" />
+                <input id="inp-qty" type="number" class="input bg-slate-800 text-xs" placeholder="CANTIDAD" />
+                <input id="inp-buy" type="number" class="input bg-slate-800 text-xs" placeholder="PRECIO USD" />
+            </div>
+            <div class="flex gap-2 mt-4">
+                <button onclick="saveAsset('BUY')" class="btn btn-primary flex-1 btn-sm">COMPRAR</button>
+                <button onclick="saveAsset('SELL')" class="btn btn-error flex-1 btn-sm">VENDER</button>
+            </div>
+        </div>
+    </dialog>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCCl7cwgZnGovzYxTwArAg5v8_DTUpHjI8",
+            authDomain: "mi-cartera-21e65.firebaseapp.com",
+            databaseURL: "https://mi-cartera-21e65-default-rtdb.firebaseio.com",
+            projectId: "mi-cartera-21e65",
+            storageBucket: "mi-cartera-21e65.firebasestorage.app",
+            messagingSenderId: "74632317534",
+            appId: "1:74632317534:web:9c8c302f6d25e81c1e02cf"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth(), db = firebase.database();
+        const TWELVE_DATA_KEY = "b027de929f374e4e9ae0fd15dbb0036f";
+        
+        let portfolio = [], cash = 0, currentUser = null;
+
+        function login() {
+            const e = document.getElementById('auth-email').value, p = document.getElementById('auth-pass').value;
+            auth.signInWithEmailAndPassword(e, p).catch(err => document.getElementById('auth-error').innerText = "ERROR");
+        }
+
+        function register() {
+            const e = document.getElementById('auth-email').value, p = document.getElementById('auth-pass').value;
+            auth.createUserWithEmailAndPassword(e, p).catch(err => document.getElementById('auth-error').innerText = err.message);
+        }
+
+        auth.onAuthStateChanged(user => {
+            if(user) {
+                currentUser = user;
+                document.getElementById('login-screen').classList.add('hidden');
+                document.getElementById('app-screen').classList.remove('hidden');
+                document.getElementById('user-display').innerText = user.email;
+                loadUserData();
+            } else {
+                document.getElementById('login-screen').classList.remove('hidden');
+                document.getElementById('app-screen').classList.add('hidden');
+            }
+        });
+
+        function loadUserData() {
+            db.ref(`users/${currentUser.uid}`).on('value', snap => {
+                const data = snap.val() || { portfolio: [], cash: 0 };
+                portfolio = Array.isArray(data.portfolio) ? data.portfolio : [];
+                cash = data.cash || 0;
+                document.getElementById('cash-available').value = cash.toFixed(2);
+                render(); updateUI();
+            });
+        }
+
+        function syncToFirebase() {
+            if(!currentUser) return;
+            cash = parseFloat(document.getElementById('cash-available').value) || 0;
+            db.ref(`users/${currentUser.uid}`).set({ portfolio, cash });
+        }
+
+        function saveAsset(type) {
+            const q = parseFloat(document.getElementById('inp-qty').value), b = parseFloat(document.getElementById('inp-buy').value);
+            const t = document.getElementById('inp-ticker').value.toUpperCase().trim(), f = document.getElementById('inp-folder').value;
+            const r = parseFloat(document.getElementById('inp-ratio').value) || 1;
+            if(!q || !b || !t) return;
+            const com = (q * b) * 0.005;
+            if (type === 'BUY') { cash -= (q * b + com); portfolio.push({ folder: f, ticker: t, qty: q, ratio: r, buy: b }); }
+            else { cash += (q * b - com); portfolio.push({ folder: f, ticker: t, qty: -q, ratio: r, buy: b }); }
+            syncToFirebase(); document.getElementById('modal_asset').close();
+        }
+
+        function removeAsset(t, f) {
+            if(confirm(`Eliminar ${t}?`)) {
+                portfolio = portfolio.filter(i => !(i.ticker === t && i.folder === f));
+                syncToFirebase();
+            }
+        }
+
+        function getConsolidated() {
+            const groups = {};
+            portfolio.forEach(item => {
+                const key = `${item.folder}-${item.ticker}`;
+                if (!groups[key]) groups[key] = { ...item, totalCostPure: 0, totalQty: 0, lastPrice: 0 };
+                groups[key].totalQty += item.qty;
+                if (item.qty > 0) groups[key].totalCostPure += (item.qty * item.buy);
+            });
+            return Object.values(groups).filter(g => Math.abs(g.totalQty) > 0.001).map(g => ({
+                ...g, ppc: g.totalCostPure / g.totalQty, totalCom: g.totalCostPure * 0.005
+            }));
+        }
+
+        function render() {
+            const consolidated = getConsolidated();
+            const tbody = document.getElementById('portfolio-body');
+            tbody.innerHTML = '';
+            ["Cedears", "Acciones", "Bonos", "ONs"].forEach(f => {
+                const items = consolidated.filter(i => i.folder === f);
+                if (items.length > 0) {
+                    tbody.innerHTML += `<tr class="category-row"><td colspan="8" class="py-2 px-6 text-left italic font-black uppercase">${f}</td></tr>`;
+                    items.forEach(item => {
+                        tbody.innerHTML += `<tr class="border-b border-white/5 hover:bg-white/5">
+                            <td class="pl-6 py-4 font-bold text-white uppercase italic text-left">${item.ticker}</td>
+                            <td>${item.totalQty.toFixed(2)}</td>
+                            <td>$${item.ppc.toFixed(2)}</td>
+                            <td class="text-primary font-bold">+$${item.totalCom.toFixed(2)}</td>
+                            <td class="font-bold text-white">$${(item.totalCostPure + item.totalCom).toFixed(2)}</td>
+                            <td>
+                                <div id="adj-${item.ticker}" class="font-bold italic">$0.00</div>
+                                <div class="text-[8px] opacity-30 uppercase">NYSE: <span id="nyse-${item.ticker}">$0.00</span></div>
+                            </td>
+                            <td><div id="perc-${item.ticker}" class="font-bold text-primary">-%</div></td>
+                            <td><button onclick="removeAsset('${item.ticker}', '${item.folder}')" class="text-error opacity-40">✕</button></td>
+                        </tr>`;
+                    });
+                }
+            });
+        }
+
+        async function updatePrices() {
+            const consolidated = getConsolidated();
+            const btn = document.getElementById('btn-refresh');
+            btn.classList.add('animate-spin');
+            
+            // ⚠️ REEMPLAZA CON TU URL DE RENDER
+            const API_URL = "https://mi-cartera-api.onrender.com";
+            
+            // Recolecta tickers
+            const tickers = consolidated.map(i => i.ticker);
+            
+            try {
+                const res = await fetch(`${API_URL}/api/precios`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tickers })
+                });
+                
+                if (!res.ok) throw new Error(`API error: ${res.status}`);
+                const data = await res.json();
+                
+                // Actualiza UI con los precios
+                consolidated.forEach(item => {
+                    const priceData = data[item.ticker];
+                    
+                    if (priceData && !priceData.error) {
+                        const cedearPrice = priceData.cedear;
+                        const nysePrice = priceData.nyse;
+                        
+                        const adjEl = document.getElementById(`adj-${item.ticker}`);
+                        const nyseEl = document.getElementById(`nyse-${item.ticker}`);
+                        
+                        if(adjEl) {
+                            adjEl.innerText = `$${cedearPrice.toFixed(2)}`;
+                            nyseEl.innerText = `$${nysePrice.toFixed(2)}`;
+                            adjEl.className = `font-bold italic ${cedearPrice >= item.ppc ? 'text-success' : 'text-error'}`;
+                        }
+                    } else {
+                        console.warn(`Error en ${item.ticker}:`, priceData?.error);
+                    }
+                });
+                
+            } catch (e) { 
+                console.error('Error updating prices:', e.message);
+                alert('No se pudieron traer los precios. Verifica que la API esté online.');
+            }
+            
+            btn.classList.remove('animate-spin');
+            updateUI();
+        }
+
+        // Cargar precios en caché al iniciar (desde localStorage)
+        window.addEventListener('load', () => {
+            const consolidated = getConsolidated();
+            consolidated.forEach(item => {
+                const cached = getCachedPrice(item.ticker);
+                if (cached) {
+                    const cedearPrice = cached / item.ratio;
+                    const adjEl = document.getElementById(`adj-${item.ticker}`);
+                    const nyseEl = document.getElementById(`nyse-${item.ticker}`);
+                    if(adjEl) {
+                        adjEl.innerText = `$${cedearPrice.toFixed(2)}`;
+                        nyseEl.innerText = `$${cached.toFixed(2)} (CACHE)`;
+                        adjEl.className = `font-bold italic ${cedearPrice >= item.ppc ? 'text-success' : 'text-error'}`;
+                    }
+                }
+            });
+            updateUI();
+        });
+
+        function updateUI() {
+            const consolidated = getConsolidated();
+            let tV = 0, tI = 0;
+            consolidated.forEach(item => {
+                const adjVal = document.getElementById(`adj-${item.ticker}`)?.innerText.replace('$', '') || 0;
+                const currentPrice = parseFloat(adjVal) > 0 ? parseFloat(adjVal) : item.ppc;
+                tV += (currentPrice * item.totalQty);
+                tI += (item.totalCostPure + item.totalCom);
+            });
+            const combined = tV + cash;
+            document.getElementById('total-assets').innerText = `$${tV.toFixed(2)}`;
+            document.getElementById('total-profit').innerText = `$${(tV - tI).toFixed(2)}`;
+            document.getElementById('total-profit').className = `text-sm font-mono font-bold ${(tV-tI) >= 0 ? 'text-success' : 'text-error'}`;
+            document.getElementById('total-combined').innerText = `$${combined.toFixed(2)}`;
+            document.getElementById('total-perc').innerText = `${tI > 0 ? (((tV-tI)/tI)*100).toFixed(2) : '0.00'}%`;
+            
+            consolidated.forEach(item => {
+                const adjVal = document.getElementById(`adj-${item.ticker}`)?.innerText.replace('$', '') || 0;
+                const cp = parseFloat(adjVal) > 0 ? parseFloat(adjVal) : item.ppc;
+                const p = combined > 0 ? ((cp * item.totalQty) / combined) * 100 : 0;
+                if(document.getElementById(`perc-${item.ticker}`)) document.getElementById(`perc-${item.ticker}`).innerText = `${p.toFixed(1)}%`;
+            });
+        }
+    </script>
+</body>
+</html>
